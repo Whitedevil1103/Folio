@@ -80,19 +80,19 @@ export default function Reader() {
         }
 
         rendition.on('relocated', (location) => {
-  const pct = book.locations?.length()
-    ? Math.round(book.locations.percentageFromCfi(location.start.cfi) * 100)
-    : 0
-  setPercentage(pct)
-  
-  // Safely attempt the database update without blocking the UI thread
-  try {
-    saveProgress(id, { location: location.start.cfi, percentage: pct })
-      .catch(err => console.warn("Syncing progress paused:", err.message))
-  } catch (e) {
-    console.warn("Progress update caught:", e)
-  }
-})
+          const pct = book.locations?.length()
+          ? Math.round(book.locations.percentageFromCfi(location.start.cfi) * 100)
+          : 0
+        setPercentage(pct)
+        
+        // Safely attempt the database update without blocking the UI thread
+        try {
+          saveProgress(id, { location: location.start.cfi, percentage: pct })
+            .catch(err => console.warn("Syncing progress paused:", err.message))
+        } catch (e) {
+          console.warn("Progress update caught:", e)
+        }
+      })
 
         // Generate locations in background for accurate percentage tracking
         book.ready.then(() => book.locations.generate(1000))
