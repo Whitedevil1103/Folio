@@ -91,10 +91,11 @@ export async function fetchBookContent(book) {
   const url = book.epubUrl || book.textUrl
   if (!url) throw new Error('No readable format available for this book')
 
-  // Using corsproxy.io wrapper
-  const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`
+  // Convert the full gutenberg URL into your local Vercel proxy route
+  // e.g., https://www.gutenberg.org/ebooks/84 -> /api/gutenberg/ebooks/84
+  const localProxyUrl = url.replace('https://www.gutenberg.org', '/api/gutenberg')
 
-  const res = await fetch(proxyUrl)
+  const res = await fetch(localProxyUrl)
   if (!res.ok) throw new Error('Failed to download book content')
   
   const blob = await res.blob()
