@@ -91,11 +91,24 @@ export async function fetchBookContent(book) {
   const url = book.epubUrl || book.textUrl
   if (!url) throw new Error('No readable format available for this book')
 
-  // Convert the full gutenberg URL into your local Vercel proxy route
-  // e.g., https://www.gutenberg.org/ebooks/84 -> /api/gutenberg/ebooks/84
-  const localProxyUrl = url.replace('https://www.gutenberg.org', '/api/gutenberg')
+  // Convert the initial URL to use our Vercel proxy
+  let targetUrl = url.replace('https://www.gutenberg.org', '/api/gutenberg')
 
-  const res = await fetch(localProxyUrl)
+  // 1. Tell fetch to manually handle redirects instead of letting the browser do it blindly
+  let res = await fetch(targetUrl, { redirect: 'manual' })
+
+  // 2. If Gutenberg tries to redirect us (status 301 or 302)
+  if (res.status === 301 || res.status === 302 || res.type === 'opaqueredirect') {
+    // Gutendex metadata usually points to /ebooks/, but downloads live in /cache/
+    // We force the redirect link to route back through our Vercel proxy
+    const redirectedUrl = url.replace('/ebooks/', '/cache/epub/').replace('.epub3.images', '/pg' + book.id + '-images-3.epub')
+    
+    // Fallback/Smart replacement for Gutenberg's known cache structures
+    const finalProxyUrl = redirectedUrl.replace('https://www.gutenberg.org', '/api/gutenberg')
+    
+    res = await fetch(finalProxyUrl)
+  }
+
   if (!res.ok) throw new Error('Failed to download book content')
   
   const blob = await res.blob()
