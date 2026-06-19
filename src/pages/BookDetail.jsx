@@ -1,0 +1,172 @@
+import { useEffect, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useLibrary } from '../contexts/LibraryContext'
+import { getBookById } from '../lib/gutendex'
+import { hasOfflineFile, saveBookFile } from '../lib/db'
+import { fetchBookContent } from '../lib/gutendex'
+import { ArrowLeft, Plus, Check, Download, BookOpen, Loader2 } from 'lucide-react'
+
+export default function BookDetail() {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const { collection, addToCollection, removeFromCollection, isInCollection, getProgress } = useLibrary()
+
+  const [book, setBook] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [offlineReady, setOfflineReady] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      setLoading(true)
+      // First check if it's already in the local collection (works offline)
+      const existing = collection.find((b) => b.id === id)
+      if (existing) {
+        if (!cancelled) setBook(existing)
+      } else if (id.startsWith('gutenberg-')) {
+        try {
+          const sourceId = id.replace('gutenberg-', '')
+          const fetched = await getBookById(sourceId)
+          if (!cancelled) setBook(fetched)
+        } catch (err) {
+          console.error(err)
+        }
+      }
+      const offline = await hasOfflineFile(id)
+      if (!cancelled) {
+        setOfflineReady(offline)
+        setLoading(false)
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  }, [id, collection])
+
+  async function handleToggleCollection() {
+    if (isInCollection(book.id)) {
+      await removeFromCollection(book.id)
+    } else {
+      await addToCollection({ ...book, addedAt: Date.now() })
+    }
+  }
+
+  async function handleDownloadOffline() {
+    setDownloading(true)
+    try {
+      const { blob } = await fetchBookContent(book)
+      await saveBookFile(book.id, blob)
+      setOfflineReady(true)
+      if (!isInCollection(book.id)) {
+        await addToCollection({ ...book, addedAt: Date.now() })
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Could not download this book for offline reading.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const progress = book ? getProgress(book.id) : null
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-32 text-ink-muted gap-2">
+        <Loader2 size={18} className="animate-spin" />
+        <span className="text-sm">Loading...</span>
+      </div>
+    )
+  }
+
+  if (!book) {
+    return (
+      <div className="px-6 py-16 text-center">
+        <p className="text-ink-muted text-sm mb-4">This book isn't available, especially if you're offline.</p>
+        <button onClick={() => navigate(-1)} className="text-teal-600 text-sm font-medium">
+          Go back
+        </button>
+      </div>
+    )
+  }
+
+  const inCollection = isInCollection(book.id)
+
+  return (
+    <div className="max-w-3xl mx-auto px-6 py-8">
+      <button onClick={() => navigate(-1)} className="flex items-center gap-1.5 text-ink-muted text-sm mb-6 hover:text-ink">
+        <ArrowLeft size={16} /> Back
+      </button>
+
+      <div className="flex flex-col sm:flex-row gap-8">
+        <div className="w-40 flex-shrink-0 mx-auto sm:mx-0">
+          <div className="rounded-sm overflow-hidden shadow-lg">
+            {book.cover ? (
+              <img src={book.cover} alt={book.title} className="w-full aspect-[2/3] object-cover" />
+            ) : (
+              <div className="w-full aspect-[2/3] flex items-center justify-center bg-gradient-to-br from-teal-100 to-parchment p-4">
+                <span className="font-display text-sm text-teal-600 text-center">{book.title}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 text-center sm:text-left">
+          <h1 className="font-display text-2xl sm:text-3xl text-ink leading-tight">{book.title}</h1>
+          <p className="text-ink-muted mt-1.5">{book.author}</p>
+
+          {book.subjects?.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-4 justify-center sm:justify-start">
+              {book.subjects.slice(0, 4).map((s) => (
+                <span key={s} className="text-xs bg-ink/5 text-ink-muted px-2.5 py-1 rounded-full">
+                  {s.split(' -- ')[0]}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {progress && progress.percentage > 0 && (
+            <div className="mt-5 max-w-xs mx-auto sm:mx-0">
+              <div className="flex justify-between text-xs text-ink-muted mb-1">
+                <span>Progress</span>
+                <span>{Math.round(progress.percentage)}%</span>
+              </div>
+              <div className="h-1.5 bg-ink/10 rounded-full overflow-hidden">
+                <div className="h-full bg-teal-500" style={{ width: `${progress.percentage}%` }} />
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3 mt-6 justify-center sm:justify-start">
+            <button
+              onClick={() => navigate(`/read/${book.id}`)}
+              className="flex items-center gap-2 bg-teal-600 text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:bg-teal-500 transition-colors"
+            >
+              <BookOpen size={16} />
+              {progress?.percentage > 0 ? 'Continue reading' : 'Start reading'}
+            </button>
+
+            <button
+              onClick={handleToggleCollection}
+              className="flex items-center gap-2 border border-ink/15 text-sm font-medium px-5 py-2.5 rounded-lg hover:bg-ink/5 transition-colors"
+            >
+              {inCollection ? <Check size={16} className="text-teal-600" /> : <Plus size={16} />}
+              {inCollection ? 'In your library' : 'Add to library'}
+            </button>
+
+            <button
+              onClick={handleDownloadOffline}
+              disabled={downloading || offlineReady}
+              className="flex items-center gap-2 border border-ink/15 text-sm font-medium px-5 py-2.5 rounded-lg hover:bg-ink/5 transition-colors disabled:opacity-60"
+            >
+              {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              {offlineReady ? 'Available offline' : downloading ? 'Downloading...' : 'Download for offline'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

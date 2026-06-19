@@ -1,0 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  body {
+    @apply bg-parchment text-ink font-body antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Reading mode themes */
+  .theme-light { background: #F9F7F2; color: #1A1814; }
+  .theme-dark  { background: #1C1917; color: #E8E4DC; }
+  .theme-sepia { background: #F4ECD8; color: #3B2F20; }
+}
+
+@layer utilities {
+  .reading-text {
+    font-family: 'Lora', Georgia, serif;
+    font-size: var(--reading-size, 18px);
+    line-height: var(--reading-lh, 1.85);
+    letter-spacing: 0.01em;
+  }
+
+  .thin-scrollbar::-webkit-scrollbar { width: 4px; }
+  .thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .thin-scrollbar::-webkit-scrollbar-thumb { background: #d1cdc7; border-radius: 4px; }
+
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
