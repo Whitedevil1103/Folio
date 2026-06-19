@@ -91,8 +91,8 @@ export async function fetchBookContent(book) {
   const url = book.epubUrl || book.textUrl
   if (!url) throw new Error('No readable format available for this book')
 
-  // Using thingproxy, which streams raw assets reliably without timeouts or buttons
-  const proxyUrl = `https://thingproxy.freeboard.io/fetch/${url}`
+  // Using corsproxy.io wrapper
+  const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`
 
   const res = await fetch(proxyUrl)
   if (!res.ok) throw new Error('Failed to download book content')
