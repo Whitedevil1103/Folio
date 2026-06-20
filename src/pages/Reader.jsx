@@ -22,6 +22,7 @@ export default function Reader() {
   const viewerRef = useRef(null)
   const bookRef = useRef(null)
   const renditionRef = useRef(null)
+  const scrollCleanupRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -58,13 +59,13 @@ export default function Reader() {
         const book = ePub(arrayBuffer)
         bookRef.current = book
 
-        // Continuous scroll, not page-flipping. This is what lets the
-        // book behave like an actual scrollable document rather than a
-        // slideshow, and it's what removes the need for tap zones or
-        // letterboxing around fixed-size content.
+        // scrolled-doc renders one section at a time as a single tall
+        // scrollable document. This is far more reliable than the
+        // continuous manager, which has known bugs around measuring
+        // content height correctly. We auto-advance to the next chapter
+        // when the reader nears the bottom, so it still feels continuous.
         const rendition = book.renderTo(viewerRef.current, {
-          manager: 'continuous',
-          flow: 'scrolled',
+          flow: 'scrolled-doc',
           width: '100%',
           height: '100%',
         })
@@ -92,6 +93,25 @@ export default function Reader() {
         // manga readers, since scrolling itself handles navigation now.
         rendition.on('click', () => setControlsVisible((v) => !v))
 
+        // Auto-advance to the next chapter when nearing the bottom of
+        // the current one, so reading still feels like one continuous
+        // scroll rather than a hard chapter-by-chapter break.
+        let advancing = false
+        const container = viewerRef.current
+        function handleScroll() {
+          if (advancing || !container) return
+          const remaining = container.scrollHeight - container.scrollTop - container.clientHeight
+          if (remaining < 60) {
+            advancing = true
+            rendition.next().finally(() => {
+              container.scrollTop = 1
+              setTimeout(() => { advancing = false }, 400)
+            })
+          }
+        }
+        container?.addEventListener('scroll', handleScroll)
+        scrollCleanupRef.current = () => container?.removeEventListener('scroll', handleScroll)
+
         book.ready.then(() => book.locations.generate(1000))
 
         setLoading(false)
@@ -108,6 +128,7 @@ export default function Reader() {
 
     return () => {
       cancelled = true
+      scrollCleanupRef.current?.()
       renditionRef.current?.destroy()
       bookRef.current?.destroy()
     }
@@ -126,9 +147,6 @@ export default function Reader() {
         padding: '6vh 24px !important',
       },
       p: { 'line-height': '1.85 !important' },
-      // Force any image or cover SVG to scale to the column instead of
-      // floating at native pixel size, which is what caused the gray
-      // letterboxing around the cover.
       'img, svg': {
         'max-width': '100% !important',
         height: 'auto !important',
@@ -164,9 +182,7 @@ export default function Reader() {
   }, [])
 
   const scrollBy = useCallback((amount) => {
-    const iframe = viewerRef.current?.querySelector('iframe')
-    const win = iframe?.contentWindow
-    if (win) win.scrollBy({ top: amount, behavior: 'smooth' })
+    viewerRef.current?.scrollBy({ top: amount, behavior: 'smooth' })
   }, [])
 
   useEffect(() => {
