@@ -122,7 +122,7 @@ export function LibraryProvider({ children }) {
             location: entry.location,
             percentage: entry.percentage,
             updated_at: new Date(entry.updatedAt).toISOString(),
-          })
+          }, { onConflict: 'user_id,book_id' })
         } else if (entry.type === 'add_book') {
           await supabase.from('collection_items').upsert({
             user_id: user.id,
@@ -134,7 +134,7 @@ export function LibraryProvider({ children }) {
             source_id: entry.book.sourceId,
             epub_url: entry.book.epubUrl,
             text_url: entry.book.textUrl,
-          })
+          }, { onConflict: 'user_id,book_id' })
         } else if (entry.type === 'remove_book') {
           await supabase.from('collection_items')
             .delete()
@@ -168,7 +168,7 @@ export function LibraryProvider({ children }) {
           source_id: book.sourceId,
           epub_url: book.epubUrl,
           text_url: book.textUrl,
-        })
+        }, { onConflict: 'user_id,book_id' })
         return
       } catch (err) {
         console.error('Remote add failed, queuing', err)
@@ -210,7 +210,7 @@ export function LibraryProvider({ children }) {
           location,
           percentage,
           updated_at: new Date(updatedAt).toISOString(),
-        })
+        }, { onConflict: 'user_id,book_id' })
         return
       } catch (err) {
         console.error('Remote progress save failed, queuing', err)
