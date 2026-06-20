@@ -141,7 +141,12 @@ export default function BookDetail() {
 
           <div className="flex flex-wrap gap-3 mt-6 justify-center sm:justify-start">
             <button
-              onClick={() => navigate(`/read/${book.id}`)}
+              onClick={async () => {
+                if (!isInCollection(book.id)) {
+                  await addToCollection({ ...book, addedAt: Date.now() })
+                }
+                navigate(`/read/${book.id}`)
+              }}
               className="flex items-center gap-2 bg-teal-600 text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:bg-teal-500 transition-colors"
             >
               <BookOpen size={16} />
