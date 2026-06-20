@@ -22,7 +22,6 @@ export default function Reader() {
   const viewerRef = useRef(null)
   const bookRef = useRef(null)
   const renditionRef = useRef(null)
-  const scrollCleanupRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -59,13 +58,12 @@ export default function Reader() {
         const book = ePub(arrayBuffer)
         bookRef.current = book
 
-        // scrolled-doc renders one section at a time as a single tall
-        // scrollable document. This is far more reliable than the
-        // continuous manager, which has known bugs around measuring
-        // content height correctly. We auto-advance to the next chapter
-        // when the reader nears the bottom, so it still feels continuous.
+        // True continuous scroll: epub.js stacks multiple chapters in
+        // one scrollable area and preloads ahead as you approach the
+        // edge, rather than snapping between discrete chapter "pages".
         const rendition = book.renderTo(viewerRef.current, {
-          flow: 'scrolled-doc',
+          manager: 'continuous',
+          flow: 'scrolled',
           width: '100%',
           height: '100%',
         })
@@ -90,54 +88,31 @@ export default function Reader() {
         })
 
         // A tap toggles the chrome, same gesture as Apple Books / most
-        // manga readers, since scrolling itself handles navigation now.
+        // manga readers, since scrolling itself handles navigation.
         rendition.on('click', () => setControlsVisible((v) => !v))
 
-        // Auto-advance to the next chapter when nearing the bottom of
-        // the current one, so reading still feels like one continuous
-        // scroll rather than a hard chapter-by-chapter break.
-        //
-        // Mobile browsers resize their visible viewport as the address
-        // bar shows/hides mid-scroll, without always firing a resize
-        // event, and layout for the new chapter can take a moment to
-        // settle. A larger threshold, a debounce, and waiting for an
-        // actual paint (not just a fixed timeout) make this reliable.
-        let advancing = false
-        let scrollDebounce
-        const container = viewerRef.current
-
-        function settleThenReset() {
+        // Known epub.js bug: in continuous+scrolled mode, each chapter's
+        // hidden iframe doesn't always get sized to match its actual
+        // content height, which makes the browser think there's nothing
+        // left to scroll even though there is. This recalculates the
+        // real height every time a chapter is rendered, which is the
+        // documented community fix for that specific bug.
+        rendition.on('rendered', (section, view) => {
+          const iframe = view?.iframe
+          if (!iframe) return
           requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              if (container) container.scrollTop = 1
-              advancing = false
-            })
+            const doc = iframe.contentDocument
+            const contentHeight = doc?.documentElement?.scrollHeight || doc?.body?.scrollHeight || 0
+            if (contentHeight > 0) {
+              iframe.style.height = `${contentHeight}px`
+            }
+            let wrapper = iframe.parentElement
+            while (wrapper && wrapper !== viewerRef.current) {
+              wrapper.style.height = 'auto'
+              wrapper = wrapper.parentElement
+            }
           })
-        }
-
-        function checkNearBottom() {
-          if (advancing || !container) return
-          const remaining = container.scrollHeight - container.scrollTop - container.clientHeight
-          if (remaining < 120) {
-            advancing = true
-            rendition.next().then(settleThenReset).catch(() => { advancing = false })
-          }
-        }
-        function handleScroll() {
-          clearTimeout(scrollDebounce)
-          checkNearBottom()
-          // Re-check shortly after scrolling settles too, in case the
-          // viewport height shifted (address bar animating) right as
-          // the user reached the bottom.
-          scrollDebounce = setTimeout(checkNearBottom, 150)
-        }
-        container?.addEventListener('scroll', handleScroll, { passive: true })
-        container?.addEventListener('touchend', checkNearBottom)
-        scrollCleanupRef.current = () => {
-          clearTimeout(scrollDebounce)
-          container?.removeEventListener('scroll', handleScroll)
-          container?.removeEventListener('touchend', checkNearBottom)
-        }
+        })
 
         book.ready.then(() => book.locations.generate(1000))
 
@@ -155,7 +130,6 @@ export default function Reader() {
 
     return () => {
       cancelled = true
-      scrollCleanupRef.current?.()
       renditionRef.current?.destroy()
       bookRef.current?.destroy()
     }
@@ -174,9 +148,6 @@ export default function Reader() {
         padding: '6vh 24px !important',
       },
       p: { 'line-height': '1.85 !important' },
-      // Force any image or cover SVG to scale to the column instead of
-      // floating at native pixel size, which is what caused the gray
-      // letterboxing around the cover.
       'img, svg': {
         'max-width': '100% !important',
         height: 'auto !important',
@@ -213,18 +184,6 @@ export default function Reader() {
 
   const scrollBy = useCallback((amount) => {
     viewerRef.current?.scrollBy({ top: amount, behavior: 'smooth' })
-  }, [])
-
-  // Manual fallback, always available regardless of whether the
-  // automatic near-bottom detection fires correctly on a given device.
-  const goNextChapter = useCallback(() => {
-    renditionRef.current?.next().then(() => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (viewerRef.current) viewerRef.current.scrollTop = 1
-        })
-      })
-    })
   }, [])
 
   useEffect(() => {
@@ -346,7 +305,9 @@ export default function Reader() {
         </div>
       )}
 
-      {/* Reading surface, full bleed, no card, no frame */}
+      {/* Reading surface, full bleed, no card, no frame. This div owns
+          its own scroll since the fixed-position page shell around it
+          can't grow with content. */}
       <div
         ref={viewerRef}
         className="flex-1"
@@ -371,17 +332,9 @@ export default function Reader() {
             style={{ width: `${percentage}%`, background: '#2D6A5E' }}
           />
         </div>
-        <div className="flex items-center justify-center gap-3">
-          <p className="text-center text-[11px] opacity-50 font-medium tracking-wide">
-            {percentage}% read
-          </p>
-          <button
-            onClick={goNextChapter}
-            className="text-[11px] font-medium px-2.5 py-1 rounded-full opacity-60 hover:opacity-100 hover:bg-current/5 transition-all"
-          >
-            Next chapter →
-          </button>
-        </div>
+        <p className="text-center text-[11px] opacity-50 font-medium tracking-wide">
+          {percentage}% read
+        </p>
       </div>
     </div>
   )
