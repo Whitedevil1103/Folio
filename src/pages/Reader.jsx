@@ -288,8 +288,14 @@ export default function Reader() {
         </div>
       )}
 
-      {/* Reading surface, full bleed, no card, no frame */}
-      <div ref={viewerRef} className="flex-1" />
+      {/* Reading surface, full bleed, no card, no frame. This div owns
+          its own scroll since the fixed-position page shell around it
+          can't grow with content. */}
+      <div
+        ref={viewerRef}
+        className="flex-1"
+        style={{ overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}
+      />
 
       {/* Bottom bar, frosted glass, shown on tap */}
       <div
