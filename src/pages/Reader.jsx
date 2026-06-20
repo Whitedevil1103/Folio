@@ -22,6 +22,7 @@ export default function Reader() {
   const viewerRef = useRef(null)
   const bookRef = useRef(null)
   const renditionRef = useRef(null)
+  const scrollCleanupRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -31,6 +32,7 @@ export default function Reader() {
   const [fontSize, setFontSize] = useState(18)
   const [percentage, setPercentage] = useState(0)
   const [bookTitle, setBookTitle] = useState('')
+  const [transitioning, setTransitioning] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -58,12 +60,14 @@ export default function Reader() {
         const book = ePub(arrayBuffer)
         bookRef.current = book
 
-        // True continuous scroll: epub.js stacks multiple chapters in
-        // one scrollable area and preloads ahead as you approach the
-        // edge, rather than snapping between discrete chapter "pages".
+        // scrolled-doc renders one chapter at a time as a single,
+        // accurately-measured scrollable document. epub.js's built-in
+        // continuous mode (multiple chapters stacked) repeatedly proved
+        // unreliable, breaking progress tracking and chapter loading,
+        // so chapters advance automatically with a crossfade instead,
+        // which reads as continuous without that fragility underneath.
         const rendition = book.renderTo(viewerRef.current, {
-          manager: 'continuous',
-          flow: 'scrolled',
+          flow: 'scrolled-doc',
           width: '100%',
           height: '100%',
         })
@@ -87,32 +91,51 @@ export default function Reader() {
           saveProgress(id, { location: location.start.cfi, percentage: pct })
         })
 
-        // A tap toggles the chrome, same gesture as Apple Books / most
-        // manga readers, since scrolling itself handles navigation.
         rendition.on('click', () => setControlsVisible((v) => !v))
 
-        // Known epub.js bug: in continuous+scrolled mode, each chapter's
-        // hidden iframe doesn't always get sized to match its actual
-        // content height, which makes the browser think there's nothing
-        // left to scroll even though there is. This recalculates the
-        // real height every time a chapter is rendered, which is the
-        // documented community fix for that specific bug.
-        rendition.on('rendered', (section, view) => {
-          const iframe = view?.iframe
-          if (!iframe) return
+        // Auto-advance to the next chapter when nearing the bottom,
+        // with a brief crossfade so the handoff reads as continuous
+        // rather than a visible jump back to the top of a new page.
+        let advancing = false
+        let scrollDebounce
+        const container = viewerRef.current
+
+        function settleThenReveal() {
           requestAnimationFrame(() => {
-            const doc = iframe.contentDocument
-            const contentHeight = doc?.documentElement?.scrollHeight || doc?.body?.scrollHeight || 0
-            if (contentHeight > 0) {
-              iframe.style.height = `${contentHeight}px`
-            }
-            let wrapper = iframe.parentElement
-            while (wrapper && wrapper !== viewerRef.current) {
-              wrapper.style.height = 'auto'
-              wrapper = wrapper.parentElement
-            }
+            requestAnimationFrame(() => {
+              if (container) container.scrollTop = 1
+              setTransitioning(false)
+              setTimeout(() => { advancing = false }, 250)
+            })
           })
-        })
+        }
+
+        function checkNearBottom() {
+          if (advancing || !container) return
+          const remaining = container.scrollHeight - container.scrollTop - container.clientHeight
+          if (remaining < 120) {
+            advancing = true
+            setTransitioning(true)
+            setTimeout(() => {
+              rendition.next().then(settleThenReveal).catch(() => {
+                setTransitioning(false)
+                advancing = false
+              })
+            }, 180)
+          }
+        }
+        function handleScroll() {
+          clearTimeout(scrollDebounce)
+          checkNearBottom()
+          scrollDebounce = setTimeout(checkNearBottom, 150)
+        }
+        container?.addEventListener('scroll', handleScroll, { passive: true })
+        container?.addEventListener('touchend', checkNearBottom)
+        scrollCleanupRef.current = () => {
+          clearTimeout(scrollDebounce)
+          container?.removeEventListener('scroll', handleScroll)
+          container?.removeEventListener('touchend', checkNearBottom)
+        }
 
         book.ready.then(() => book.locations.generate(1000))
 
@@ -130,6 +153,7 @@ export default function Reader() {
 
     return () => {
       cancelled = true
+      scrollCleanupRef.current?.()
       renditionRef.current?.destroy()
       bookRef.current?.destroy()
     }
@@ -305,13 +329,19 @@ export default function Reader() {
         </div>
       )}
 
-      {/* Reading surface, full bleed, no card, no frame. This div owns
-          its own scroll since the fixed-position page shell around it
-          can't grow with content. */}
+      {/* Reading surface. Owns its own scroll since the fixed-position
+          page shell around it can't grow with content. A brief opacity
+          dip during chapter handoff disguises the scroll-position reset
+          as a soft crossfade rather than a visible jump. */}
       <div
         ref={viewerRef}
-        className="flex-1"
-        style={{ overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}
+        className="flex-1 transition-opacity"
+        style={{
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          opacity: transitioning ? 0 : 1,
+          transitionDuration: transitioning ? '180ms' : '220ms',
+        }}
       />
 
       {/* Bottom bar, frosted glass, shown on tap */}
