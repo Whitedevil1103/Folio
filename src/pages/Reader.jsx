@@ -77,7 +77,7 @@ export default function Reader() {
         bookRef.current = book
         await book.ready
 
-        const total = book.spine.length()
+        const total = book.spine.spineItems.length
         sectionCountRef.current = total
 
         const existingProgress = getProgress(id)
