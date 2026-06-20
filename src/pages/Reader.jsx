@@ -135,10 +135,10 @@ export default function Reader() {
     }
   }, [id])
 
-  const loadNextSection = useCallback(async () => {
+const loadNextSection = useCallback(async (startIndex, attemptsLeft = 5) => {
     const book = bookRef.current
-    if (!book || loadingNextRef.current) return
-    const nextIndex = sections.length ? sections[sections.length - 1].index + 1 : 0
+    if (!book || loadingNextRef.current || attemptsLeft <= 0) return
+    const nextIndex = startIndex ?? (sections.length ? sections[sections.length - 1].index + 1 : 0)
     if (nextIndex >= sectionCountRef.current) return
 
     loadingNextRef.current = true
@@ -146,10 +146,13 @@ export default function Reader() {
       const section = book.spine.get(nextIndex)
       const html = await extractSectionHtml(book, section)
       setSections((prev) => [...prev, { index: nextIndex, html }])
-    } catch (err) {
-      console.error('Failed to load next chapter', err)
-    } finally {
       loadingNextRef.current = false
+    } catch (err) {
+      console.error(`Failed to load chapter ${nextIndex}, skipping to next`, err)
+      loadingNextRef.current = false
+      // Don't let one malformed chapter silently freeze the whole book,
+      // move on and try the one after it instead.
+      loadNextSection(nextIndex + 1, attemptsLeft - 1)
     }
   }, [sections])
 
