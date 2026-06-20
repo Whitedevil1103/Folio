@@ -96,22 +96,43 @@ export default function Reader() {
         // Auto-advance to the next chapter when nearing the bottom of
         // the current one, so reading still feels like one continuous
         // scroll rather than a hard chapter-by-chapter break.
+// Auto-advance to the next chapter when nearing the bottom of
+        // the current one, so reading still feels like one continuous
+        // scroll rather than a hard chapter-by-chapter break.
+        //
+        // Mobile browsers resize their visible viewport as the address
+        // bar shows/hides mid-scroll, without always firing a resize
+        // event, so clientHeight can be briefly stale. A larger
+        // threshold and a debounce make this reliable there too.
         let advancing = false
+        let scrollDebounce
         const container = viewerRef.current
-        function handleScroll() {
+        function checkNearBottom() {
           if (advancing || !container) return
           const remaining = container.scrollHeight - container.scrollTop - container.clientHeight
-          if (remaining < 60) {
+          if (remaining < 120) {
             advancing = true
             rendition.next().finally(() => {
               container.scrollTop = 1
-              setTimeout(() => { advancing = false }, 400)
+              setTimeout(() => { advancing = false }, 500)
             })
           }
         }
-        container?.addEventListener('scroll', handleScroll)
-        scrollCleanupRef.current = () => container?.removeEventListener('scroll', handleScroll)
-
+        function handleScroll() {
+          clearTimeout(scrollDebounce)
+          checkNearBottom()
+          // Re-check shortly after scrolling settles too, in case the
+          // viewport height shifted (address bar animating) right as
+          // the user reached the bottom.
+          scrollDebounce = setTimeout(checkNearBottom, 150)
+        }
+        container?.addEventListener('scroll', handleScroll, { passive: true })
+        container?.addEventListener('touchend', checkNearBottom)
+        scrollCleanupRef.current = () => {
+          clearTimeout(scrollDebounce)
+          container?.removeEventListener('scroll', handleScroll)
+          container?.removeEventListener('touchend', checkNearBottom)
+        }
         book.ready.then(() => book.locations.generate(1000))
 
         setLoading(false)
