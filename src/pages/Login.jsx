@@ -11,6 +11,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [signupSent, setSignupSent] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -19,10 +20,13 @@ export default function Login() {
     try {
       if (mode === 'signin') {
         await signInWithEmail(email, password)
+        navigate('/')
       } else {
         await signUpWithEmail(email, password)
+        // No session exists yet until the user confirms their email,
+        // so show a clear message instead of silently doing nothing.
+        setSignupSent(true)
       }
-      navigate('/')
     } catch (err) {
       setError(err.message || 'Something went wrong')
     } finally {
@@ -69,6 +73,25 @@ export default function Login() {
           </button>
         </div>
 
+        {signupSent ? (
+          <div className="text-center py-6">
+            <div className="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center mx-auto mb-4">
+              <BookOpen size={20} className="text-teal-600" strokeWidth={1.75} />
+            </div>
+            <p className="font-medium text-ink mb-1">Check your email</p>
+            <p className="text-sm text-ink-muted">
+              We sent a confirmation link to <span className="font-medium text-ink">{email}</span>.
+              Click it to activate your account, then come back and sign in.
+            </p>
+            <button
+              onClick={() => { setSignupSent(false); setMode('signin') }}
+              className="text-teal-600 text-sm font-medium mt-5"
+            >
+              Back to sign in
+            </button>
+          </div>
+        ) : (
+        <>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <input
             type="email"
@@ -110,6 +133,8 @@ export default function Login() {
         >
           Continue with Google
         </button>
+        </>
+        )}
       </div>
     </div>
   )
