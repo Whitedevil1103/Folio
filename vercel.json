@@ -3,6 +3,10 @@
     {
       "source": "/api/gutenberg/:path*",
       "destination": "https://www.gutenberg.org/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
