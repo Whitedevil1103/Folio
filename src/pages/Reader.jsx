@@ -14,15 +14,30 @@ const THEMES = {
   dark: { bg: '#1C1917', text: '#E8E4DC', icon: Moon, label: 'Dark' },
 }
 
+// Pulls a chapter's content out of epub.js as a plain HTML string, with
+// no iframe involved at all. epub.js's render() return shape has varied
+// across versions (sometimes a full document, sometimes just a body
+// fragment), so this parses it defensively either way and always comes
+// out with just the inner content.
+async function extractSectionHtml(book, section) {
+  const raw = await section.render(book.load.bind(book))
+  const parsed = new DOMParser().parseFromString(raw, 'text/html')
+  let html = parsed.body ? parsed.body.innerHTML : raw
+  // Defense in depth, script tags inserted via innerHTML never execute
+  // in browsers anyway, but strip them for cleanliness.
+  html = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+  return html
+}
+
 export default function Reader() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { saveProgress, getProgress, collection } = useLibrary()
 
-  const viewerRef = useRef(null)
+  const containerRef = useRef(null)
   const bookRef = useRef(null)
-  const renditionRef = useRef(null)
-  const scrollCleanupRef = useRef(null)
+  const sectionCountRef = useRef(0)
+  const loadingNextRef = useRef(false)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -32,7 +47,7 @@ export default function Reader() {
   const [fontSize, setFontSize] = useState(18)
   const [percentage, setPercentage] = useState(0)
   const [bookTitle, setBookTitle] = useState('')
-  const [transitioning, setTransitioning] = useState(false)
+  const [sections, setSections] = useState([]) // [{ index, html }]
 
   useEffect(() => {
     let cancelled = false
@@ -40,6 +55,7 @@ export default function Reader() {
     async function load() {
       setLoading(true)
       setError('')
+      setSections([])
 
       try {
         const meta = collection.find((b) => b.id === id) || (await getBookMeta(id))
@@ -59,87 +75,49 @@ export default function Reader() {
         const arrayBuffer = await blob.arrayBuffer()
         const book = ePub(arrayBuffer)
         bookRef.current = book
+        await book.ready
 
-        // scrolled-doc renders one chapter at a time as a single,
-        // accurately-measured scrollable document. epub.js's built-in
-        // continuous mode (multiple chapters stacked) repeatedly proved
-        // unreliable, breaking progress tracking and chapter loading,
-        // so chapters advance automatically with a crossfade instead,
-        // which reads as continuous without that fragility underneath.
-        const rendition = book.renderTo(viewerRef.current, {
-          flow: 'scrolled-doc',
-          width: '100%',
-          height: '100%',
-        })
-        renditionRef.current = rendition
-
-        applyTheme(rendition, theme, fontSize)
+        const total = book.spine.length()
+        sectionCountRef.current = total
 
         const existingProgress = getProgress(id)
+        let savedIndex = 0
+        let savedPercentage = 0
         if (existingProgress?.location) {
-          await rendition.display(existingProgress.location)
-          setPercentage(existingProgress.percentage || 0)
-        } else {
-          await rendition.display()
-        }
-
-        rendition.on('relocated', (location) => {
-          const pct = book.locations?.length()
-            ? Math.round(book.locations.percentageFromCfi(location.start.cfi) * 100)
-            : 0
-          setPercentage(pct)
-          saveProgress(id, { location: location.start.cfi, percentage: pct })
-        })
-
-        rendition.on('click', () => setControlsVisible((v) => !v))
-
-        // Auto-advance to the next chapter when nearing the bottom,
-        // with a brief crossfade so the handoff reads as continuous
-        // rather than a visible jump back to the top of a new page.
-        let advancing = false
-        let scrollDebounce
-        const container = viewerRef.current
-
-        function settleThenReveal() {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              if (container) container.scrollTop = 1
-              setTransitioning(false)
-              setTimeout(() => { advancing = false }, 250)
-            })
-          })
-        }
-
-        function checkNearBottom() {
-          if (advancing || !container) return
-          const remaining = container.scrollHeight - container.scrollTop - container.clientHeight
-          if (remaining < 120) {
-            advancing = true
-            setTransitioning(true)
-            setTimeout(() => {
-              rendition.next().then(settleThenReveal).catch(() => {
-                setTransitioning(false)
-                advancing = false
-              })
-            }, 180)
+          try {
+            const parsedLoc = JSON.parse(existingProgress.location)
+            savedIndex = Math.min(parsedLoc.sectionIndex || 0, total - 1)
+          } catch {
+            savedIndex = 0
           }
-        }
-        function handleScroll() {
-          clearTimeout(scrollDebounce)
-          checkNearBottom()
-          scrollDebounce = setTimeout(checkNearBottom, 150)
-        }
-        container?.addEventListener('scroll', handleScroll, { passive: true })
-        container?.addEventListener('touchend', checkNearBottom)
-        scrollCleanupRef.current = () => {
-          clearTimeout(scrollDebounce)
-          container?.removeEventListener('scroll', handleScroll)
-          container?.removeEventListener('touchend', checkNearBottom)
+          savedPercentage = existingProgress.percentage || 0
         }
 
-        book.ready.then(() => book.locations.generate(1000))
+        // Load sequentially up through the saved position, so resuming
+        // mid-book doesn't require re-scrolling through every chapter.
+        const loaded = []
+        for (let i = 0; i <= savedIndex; i++) {
+          if (cancelled) return
+          const section = book.spine.get(i)
+          const html = await extractSectionHtml(book, section)
+          loaded.push({ index: i, html })
+        }
+        if (cancelled) return
+        setSections(loaded)
+        setPercentage(savedPercentage)
 
         setLoading(false)
+
+        // After the saved chapters paint, scroll to roughly the right
+        // spot within them based on the saved overall percentage.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const el = containerRef.current
+            if (el && savedPercentage > 0) {
+              el.scrollTop = (savedPercentage / 100) * el.scrollHeight
+            }
+          })
+        })
       } catch (err) {
         console.error(err)
         if (!cancelled) {
@@ -153,61 +131,64 @@ export default function Reader() {
 
     return () => {
       cancelled = true
-      scrollCleanupRef.current?.()
-      renditionRef.current?.destroy()
       bookRef.current?.destroy()
     }
   }, [id])
 
-  function applyTheme(rendition, themeName, size) {
-    const t = THEMES[themeName]
-    rendition.themes.default({
-      html: { background: `${t.bg} !important` },
-      body: {
-        background: `${t.bg} !important`,
-        color: `${t.text} !important`,
-        'font-family': "'Lora', Georgia, serif !important",
-        'max-width': '700px !important',
-        margin: '0 auto !important',
-        padding: '6vh 24px !important',
-      },
-      p: { 'line-height': '1.85 !important' },
-      'img, svg': {
-        'max-width': '100% !important',
-        height: 'auto !important',
-        display: 'block !important',
-        margin: '0 auto !important',
-      },
-    })
-    rendition.themes.fontSize(`${size}px`)
-  }
+  const loadNextSection = useCallback(async () => {
+    const book = bookRef.current
+    if (!book || loadingNextRef.current) return
+    const nextIndex = sections.length ? sections[sections.length - 1].index + 1 : 0
+    if (nextIndex >= sectionCountRef.current) return
 
-  useEffect(() => {
-    if (renditionRef.current) {
-      applyTheme(renditionRef.current, theme, fontSize)
+    loadingNextRef.current = true
+    try {
+      const section = book.spine.get(nextIndex)
+      const html = await extractSectionHtml(book, section)
+      setSections((prev) => [...prev, { index: nextIndex, html }])
+    } catch (err) {
+      console.error('Failed to load next chapter', err)
+    } finally {
+      loadingNextRef.current = false
     }
-  }, [theme, fontSize])
+  }, [sections])
 
+  // Native scroll, no iframe, no manager, nothing to fight. This is
+  // also what tracks progress and lazily loads the next chapter.
   useEffect(() => {
-    let resizeTimeout
-    function handleResize() {
-      clearTimeout(resizeTimeout)
-      resizeTimeout = setTimeout(() => {
-        const rendition = renditionRef.current
-        if (!rendition || !viewerRef.current) return
-        const { width, height } = viewerRef.current.getBoundingClientRect()
-        rendition.resize(width, height)
+    const el = containerRef.current
+    if (!el) return
+
+    let debounce
+    function handleScroll() {
+      clearTimeout(debounce)
+      debounce = setTimeout(() => {
+        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
+        if (remaining < el.clientHeight) loadNextSection()
+
+        const currentIndex = sections.length ? sections[sections.length - 1].index : 0
+        const overallPct = sectionCountRef.current
+          ? Math.min(100, Math.round(
+              ((currentIndex + el.scrollTop / Math.max(el.scrollHeight, 1)) / sectionCountRef.current) * 100
+            ))
+          : 0
+        setPercentage(overallPct)
+        saveProgress(id, {
+          location: JSON.stringify({ sectionIndex: currentIndex }),
+          percentage: overallPct,
+        })
       }, 200)
     }
-    window.addEventListener('resize', handleResize)
+
+    el.addEventListener('scroll', handleScroll, { passive: true })
     return () => {
-      clearTimeout(resizeTimeout)
-      window.removeEventListener('resize', handleResize)
+      clearTimeout(debounce)
+      el.removeEventListener('scroll', handleScroll)
     }
-  }, [])
+  }, [sections, loadNextSection, id, saveProgress])
 
   const scrollBy = useCallback((amount) => {
-    viewerRef.current?.scrollBy({ top: amount, behavior: 'smooth' })
+    containerRef.current?.scrollBy({ top: amount, behavior: 'smooth' })
   }, [])
 
   useEffect(() => {
@@ -224,6 +205,20 @@ export default function Reader() {
 
   return (
     <div className="fixed inset-0 flex flex-col" style={{ background: t.bg }}>
+      {/* Scoped styling for the injected chapter HTML, no rendition
+          theming API needed since this is just plain DOM now. */}
+      <style>{`
+        .reader-content { max-width: 700px; margin: 0 auto; padding: 6vh 24px 12vh; }
+        .reader-content, .reader-content p { color: ${t.text}; font-family: 'Lora', Georgia, serif; }
+        .reader-content { font-size: ${fontSize}px; line-height: 1.85; }
+        .reader-content p { margin: 0 0 1.1em; }
+        .reader-content img, .reader-content svg { max-width: 100%; height: auto; display: block; margin: 1.5em auto; }
+        .reader-content h1, .reader-content h2, .reader-content h3 {
+          font-family: 'Lora', Georgia, serif; margin: 1.6em 0 0.8em; line-height: 1.3;
+        }
+        .reader-content a { color: #2D6A5E; }
+      `}</style>
+
       {/* Top bar, frosted glass, shown on tap */}
       <div
         className={`absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3.5 transition-all duration-300 ${
@@ -329,20 +324,21 @@ export default function Reader() {
         </div>
       )}
 
-      {/* Reading surface. Owns its own scroll since the fixed-position
-          page shell around it can't grow with content. A brief opacity
-          dip during chapter handoff disguises the scroll-position reset
-          as a soft crossfade rather than a visible jump. */}
-      <div
-        ref={viewerRef}
-        className="flex-1 transition-opacity"
-        style={{
-          overflowY: 'auto',
-          WebkitOverflowScrolling: 'touch',
-          opacity: transitioning ? 0 : 1,
-          transitionDuration: transitioning ? '180ms' : '220ms',
-        }}
-      />
+      {/* Reading surface. Plain HTML, real native scroll, no iframe. */}
+      {!loading && !error && (
+        <div
+          ref={containerRef}
+          className="flex-1 overflow-y-auto"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+          onClick={() => setControlsVisible((v) => !v)}
+        >
+          <div className="reader-content">
+            {sections.map((s) => (
+              <div key={s.index} dangerouslySetInnerHTML={{ __html: s.html }} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Bottom bar, frosted glass, shown on tap */}
       <div
