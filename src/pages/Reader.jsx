@@ -96,26 +96,31 @@ export default function Reader() {
         // Auto-advance to the next chapter when nearing the bottom of
         // the current one, so reading still feels like one continuous
         // scroll rather than a hard chapter-by-chapter break.
-// Auto-advance to the next chapter when nearing the bottom of
-        // the current one, so reading still feels like one continuous
-        // scroll rather than a hard chapter-by-chapter break.
         //
         // Mobile browsers resize their visible viewport as the address
         // bar shows/hides mid-scroll, without always firing a resize
-        // event, so clientHeight can be briefly stale. A larger
-        // threshold and a debounce make this reliable there too.
+        // event, and layout for the new chapter can take a moment to
+        // settle. A larger threshold, a debounce, and waiting for an
+        // actual paint (not just a fixed timeout) make this reliable.
         let advancing = false
         let scrollDebounce
         const container = viewerRef.current
+
+        function settleThenReset() {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (container) container.scrollTop = 1
+              advancing = false
+            })
+          })
+        }
+
         function checkNearBottom() {
           if (advancing || !container) return
           const remaining = container.scrollHeight - container.scrollTop - container.clientHeight
           if (remaining < 120) {
             advancing = true
-            rendition.next().finally(() => {
-              container.scrollTop = 1
-              setTimeout(() => { advancing = false }, 500)
-            })
+            rendition.next().then(settleThenReset).catch(() => { advancing = false })
           }
         }
         function handleScroll() {
@@ -133,6 +138,7 @@ export default function Reader() {
           container?.removeEventListener('scroll', handleScroll)
           container?.removeEventListener('touchend', checkNearBottom)
         }
+
         book.ready.then(() => book.locations.generate(1000))
 
         setLoading(false)
@@ -168,6 +174,9 @@ export default function Reader() {
         padding: '6vh 24px !important',
       },
       p: { 'line-height': '1.85 !important' },
+      // Force any image or cover SVG to scale to the column instead of
+      // floating at native pixel size, which is what caused the gray
+      // letterboxing around the cover.
       'img, svg': {
         'max-width': '100% !important',
         height: 'auto !important',
@@ -204,6 +213,18 @@ export default function Reader() {
 
   const scrollBy = useCallback((amount) => {
     viewerRef.current?.scrollBy({ top: amount, behavior: 'smooth' })
+  }, [])
+
+  // Manual fallback, always available regardless of whether the
+  // automatic near-bottom detection fires correctly on a given device.
+  const goNextChapter = useCallback(() => {
+    renditionRef.current?.next().then(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (viewerRef.current) viewerRef.current.scrollTop = 1
+        })
+      })
+    })
   }, [])
 
   useEffect(() => {
@@ -325,9 +346,7 @@ export default function Reader() {
         </div>
       )}
 
-      {/* Reading surface, full bleed, no card, no frame. This div owns
-          its own scroll since the fixed-position page shell around it
-          can't grow with content. */}
+      {/* Reading surface, full bleed, no card, no frame */}
       <div
         ref={viewerRef}
         className="flex-1"
@@ -352,9 +371,17 @@ export default function Reader() {
             style={{ width: `${percentage}%`, background: '#2D6A5E' }}
           />
         </div>
-        <p className="text-center text-[11px] opacity-50 font-medium tracking-wide">
-          {percentage}% read
-        </p>
+        <div className="flex items-center justify-center gap-3">
+          <p className="text-center text-[11px] opacity-50 font-medium tracking-wide">
+            {percentage}% read
+          </p>
+          <button
+            onClick={goNextChapter}
+            className="text-[11px] font-medium px-2.5 py-1 rounded-full opacity-60 hover:opacity-100 hover:bg-current/5 transition-all"
+          >
+            Next chapter →
+          </button>
+        </div>
       </div>
     </div>
   )
