@@ -128,11 +128,34 @@ export default function Reader() {
     rendition.themes.fontSize(`${size}px`)
   }
 
-  useEffect(() => {
+useEffect(() => {
     if (renditionRef.current) {
       applyTheme(renditionRef.current, theme, fontSize)
     }
   }, [theme, fontSize])
+
+  // epub.js doesn't always reflow cleanly when the viewport changes size,
+  // such as DevTools opening/closing or a phone rotating. Force a resize
+  // and re-display of the current location whenever that happens.
+  useEffect(() => {
+    let resizeTimeout
+
+    function handleResize() {
+      clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(() => {
+        const rendition = renditionRef.current
+        if (!rendition || !viewerRef.current) return
+        const { width, height } = viewerRef.current.getBoundingClientRect()
+        rendition.resize(width, height)
+      }, 200)
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => {
+      clearTimeout(resizeTimeout)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [])
 
   const goNext = useCallback(() => renditionRef.current?.next(), [])
   const goPrev = useCallback(() => renditionRef.current?.prev(), [])
