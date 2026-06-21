@@ -4,6 +4,7 @@ import { useLibrary } from '../contexts/LibraryContext'
 import { getBookById } from '../lib/gutendex'
 import { hasOfflineFile, saveBookFile } from '../lib/db'
 import { fetchBookContent } from '../lib/gutendex'
+import { getBookById as getArchiveBookById, resolveArchiveEpubUrl } from '../lib/archive'
 import { ArrowLeft, Plus, Check, Download, BookOpen, Loader2 } from 'lucide-react'
 
 export default function BookDetail() {
@@ -25,10 +26,18 @@ export default function BookDetail() {
       const existing = collection.find((b) => b.id === id)
       if (existing) {
         if (!cancelled) setBook(existing)
-      } else if (id.startsWith('gutenberg-')) {
+      } } else if (id.startsWith('gutenberg-')) {
         try {
           const sourceId = id.replace('gutenberg-', '')
           const fetched = await getBookById(sourceId)
+          if (!cancelled) setBook(fetched)
+        } catch (err) {
+          console.error(err)
+        }
+      } else if (id.startsWith('archive-')) {
+        try {
+          const sourceId = id.replace('archive-', '')
+          const fetched = await getArchiveBookById(sourceId)
           if (!cancelled) setBook(fetched)
         } catch (err) {
           console.error(err)
@@ -53,14 +62,21 @@ export default function BookDetail() {
     }
   }
 
-  async function handleDownloadOffline() {
+async function handleDownloadOffline() {
     setDownloading(true)
     try {
-      const { blob } = await fetchBookContent(book)
-      await saveBookFile(book.id, blob)
+      let bookToFetch = book
+      if (book.source === 'archive' && book.needsEpubResolution) {
+        const epubUrl = await resolveArchiveEpubUrl(book.sourceId)
+        if (!epubUrl) throw new Error('No epub format available for this book')
+        bookToFetch = { ...book, epubUrl, needsEpubResolution: false }
+        setBook(bookToFetch)
+      }
+      const { blob } = await fetchBookContent(bookToFetch)
+      await saveBookFile(bookToFetch.id, blob)
       setOfflineReady(true)
-      if (!isInCollection(book.id)) {
-        await addToCollection({ ...book, addedAt: Date.now() })
+      if (!isInCollection(bookToFetch.id)) {
+        await addToCollection({ ...bookToFetch, addedAt: Date.now() })
       }
     } catch (err) {
       console.error(err)
@@ -69,7 +85,6 @@ export default function BookDetail() {
       setDownloading(false)
     }
   }
-
   const progress = book ? getProgress(book.id) : null
 
   if (loading) {
@@ -140,19 +155,28 @@ export default function BookDetail() {
           )}
 
           <div className="flex flex-wrap gap-3 mt-6 justify-center sm:justify-start">
-            <button
+              <button
               onClick={async () => {
-                if (!isInCollection(book.id)) {
-                  await addToCollection({ ...book, addedAt: Date.now() })
+                let bookToOpen = book
+                if (book.source === 'archive' && book.needsEpubResolution) {
+                  try {
+                    const epubUrl = await resolveArchiveEpubUrl(book.sourceId)
+                    bookToOpen = { ...book, epubUrl, needsEpubResolution: false }
+                    setBook(bookToOpen)
+                  } catch (err) {
+                    console.error(err)
+                  }
                 }
-                navigate(`/read/${book.id}`)
+                if (!isInCollection(bookToOpen.id)) {
+                  await addToCollection({ ...bookToOpen, addedAt: Date.now() })
+                }
+                navigate(`/read/${bookToOpen.id}`)
               }}
               className="flex items-center gap-2 bg-teal-600 text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:bg-teal-500 transition-colors"
             >
               <BookOpen size={16} />
               {progress?.percentage > 0 ? 'Continue reading' : 'Start reading'}
             </button>
-
             <button
               onClick={handleToggleCollection}
               className="flex items-center gap-2 border border-ink/15 text-sm font-medium px-5 py-2.5 rounded-lg hover:bg-ink/5 transition-colors"
