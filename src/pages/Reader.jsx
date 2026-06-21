@@ -196,15 +196,28 @@ export default function Reader() {
     const el = containerRef.current
     if (!el) return
 
-    function checkAndUpdate() {
+function checkAndUpdate() {
       const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
       if (remaining < el.clientHeight * 1.5) loadNextSection()
 
-      const currentIndex = sections.length ? sections[sections.length - 1].index : 0
+      // Find which chapter is actually in view right now, not just the
+      // most recently loaded one, otherwise scrolling back up to reread
+      // something earlier would still report your furthest point.
+      const chapterEls = el.querySelectorAll('[data-section-index]')
+      let currentIndex = 0
+      let fractionWithinChapter = 0
+      for (const chEl of chapterEls) {
+        if (chEl.offsetTop <= el.scrollTop + 4) {
+          currentIndex = Number(chEl.dataset.sectionIndex)
+          const chapterHeight = chEl.offsetHeight || 1
+          fractionWithinChapter = Math.min(1, Math.max(0, (el.scrollTop - chEl.offsetTop) / chapterHeight))
+        } else {
+          break
+        }
+      }
+
       const overallPct = sectionCountRef.current
-        ? Math.min(100, Math.round(
-            ((currentIndex + el.scrollTop / Math.max(el.scrollHeight, 1)) / sectionCountRef.current) * 100
-          ))
+        ? Math.min(100, Math.round(((currentIndex + fractionWithinChapter) / sectionCountRef.current) * 100))
         : 0
       setPercentage(overallPct)
       saveProgress(id, {
@@ -212,7 +225,6 @@ export default function Reader() {
         percentage: overallPct,
       })
     }
-
     let debounce
     function handleScroll() {
       clearTimeout(debounce)
@@ -411,8 +423,8 @@ export default function Reader() {
         >
           <div className="reader-content">
             {sections.map((s) => (
-              <div key={s.index} dangerouslySetInnerHTML={{ __html: s.html }} />
-            ))}
+              <div key={s.index} data-section-index={s.index} dangerouslySetInnerHTML={{ __html: s.html }} />
+            ))}          
           </div>
         </div>
       )}
