@@ -5,6 +5,10 @@
       "destination": "https://www.gutenberg.org/:path*"
     },
     {
+      "source": "/api/archive/:path*",
+      "destination": "https://archive.org/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
