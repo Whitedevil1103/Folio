@@ -4,6 +4,7 @@ import ePub from 'epubjs'
 import { useLibrary } from '../contexts/LibraryContext'
 import { getBookFile, saveBookFile, getBookMeta } from '../lib/db'
 import { fetchBookContent } from '../lib/gutendex'
+import { resolveArchiveEpubUrl } from '../lib/archive'
 import {
   ArrowLeft, Sun, Moon, Coffee, Minus, Plus as PlusIcon, Check, BookOpen,
 } from 'lucide-react'
@@ -93,12 +94,15 @@ export default function Reader() {
         let blob = await getBookFile(id)
         if (!blob) {
           if (!meta) throw new Error('Book not found')
-          if (!meta.epubUrl) throw new Error('No epub format available for this book')
-          const result = await fetchBookContent(meta)
+          let epubUrl = meta.epubUrl
+          if (!epubUrl && meta.source === 'archive') {
+            epubUrl = await resolveArchiveEpubUrl(meta.sourceId)
+          }
+          if (!epubUrl) throw new Error('No epub format available for this book')
+          const result = await fetchBookContent({ ...meta, epubUrl })
           blob = result.blob
           saveBookFile(id, blob).catch(() => {})
         }
-
         if (cancelled) return
 
         const arrayBuffer = await blob.arrayBuffer()
