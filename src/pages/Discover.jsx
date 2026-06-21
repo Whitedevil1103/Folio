@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { searchBooks, getPopularBooks, getBooksByTopic, CURATED_TOPICS } from '../lib/gutendex'
 import * as archive from '../lib/archive'
 import BookCard from '../components/BookCard'
@@ -24,26 +24,50 @@ export default function Discover() {
   const [activeTopic, setActiveTopic] = useState(null)
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
   const [error, setError] = useState('')
 
-  const loadPopular = useCallback(async () => {
-    setLoading(true)
+  // Remembers how to fetch the *current* search/topic/popular view at
+  // an arbitrary page, so "Load more" can just ask for page + 1
+  // without needing to know whether we're searching, browsing a topic,
+  // or looking at the popular list.
+  const fetcherRef = useRef(null)
+  const pageRef = useRef(1)
+
+  const runFetch = useCallback(async (makeFetchers, { append = false } = {}) => {
+    const targetPage = append ? pageRef.current + 1 : 1
+    if (append) setLoadingMore(true)
+    else setLoading(true)
     setError('')
     try {
-      const results = await mergedFetch(getPopularBooks, archive.getPopularBooks)
-      setResults(results)
+      const { gutendexFn, archiveFn } = makeFetchers(targetPage)
+      const newResults = await mergedFetch(gutendexFn, archiveFn)
+      setResults((prev) => (append ? [...prev, ...newResults] : newResults))
+      setHasMore(newResults.length > 0)
+      pageRef.current = targetPage
     } catch (err) {
-      setError('Could not load books right now.')
+      if (!append) setError('Could not load books right now.')
     } finally {
       setLoading(false)
+      setLoadingMore(false)
     }
   }, [])
+
+  const loadPopular = useCallback(() => {
+    const makeFetchers = (page) => ({
+      gutendexFn: () => getPopularBooks({ page }),
+      archiveFn: () => archive.getPopularBooks({ page }),
+    })
+    fetcherRef.current = makeFetchers
+    runFetch(makeFetchers)
+  }, [runFetch])
 
   useEffect(() => {
     loadPopular()
   }, [loadPopular])
 
-  async function handleSearch(e) {
+  function handleSearch(e) {
     e.preventDefault()
     if (!query.trim()) {
       setActiveTopic(null)
@@ -51,31 +75,27 @@ export default function Discover() {
       return
     }
     setActiveTopic(null)
-    setLoading(true)
-    setError('')
-    try {
-      const results = await mergedFetch(() => searchBooks(query), () => archive.searchBooks(query))
-      setResults(results)
-    } catch (err) {
-      setError('Search failed. Check your connection and try again.')
-    } finally {
-      setLoading(false)
-    }
+    const makeFetchers = (page) => ({
+      gutendexFn: () => searchBooks(query, { page }),
+      archiveFn: () => archive.searchBooks(query, { page }),
+    })
+    fetcherRef.current = makeFetchers
+    runFetch(makeFetchers)
   }
 
-  async function handleTopic(topic) {
+  function handleTopic(topic) {
     setQuery('')
     setActiveTopic(topic)
-    setLoading(true)
-    setError('')
-    try {
-      const results = await mergedFetch(() => getBooksByTopic(topic), () => archive.getBooksByTopic(topic))
-      setResults(results)
-    } catch (err) {
-      setError('Could not load this topic right now.')
-    } finally {
-      setLoading(false)
-    }
+    const makeFetchers = (page) => ({
+      gutendexFn: () => getBooksByTopic(topic, { page }),
+      archiveFn: () => archive.getBooksByTopic(topic, { page }),
+    })
+    fetcherRef.current = makeFetchers
+    runFetch(makeFetchers)
+  }
+
+  function handleLoadMore() {
+    if (fetcherRef.current) runFetch(fetcherRef.current, { append: true })
   }
 
   return (
@@ -118,11 +138,26 @@ export default function Discover() {
       ) : results.length === 0 ? (
         <p className="text-sm text-ink-muted text-center py-12">No books found. Try a different search.</p>
       ) : (
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-5">
-          {results.map((book) => (
-            <BookCard key={book.id} book={book} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-5">
+            {results.map((book) => (
+              <BookCard key={book.id} book={book} />
+            ))}
+          </div>
+
+          {hasMore && (
+            <div className="flex justify-center mt-8">
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="flex items-center gap-2 text-sm font-medium px-5 py-2.5 rounded-lg border border-ink/15 hover:bg-ink/5 transition-colors disabled:opacity-60"
+              >
+                {loadingMore && <Loader2 size={15} className="animate-spin" />}
+                {loadingMore ? 'Loading more...' : 'Load more'}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
