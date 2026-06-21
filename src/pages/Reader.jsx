@@ -96,7 +96,8 @@ export default function Reader() {
         // Load sequentially up through the saved position, so resuming
         // mid-book doesn't require re-scrolling through every chapter.
         const loaded = []
-        for (let i = 0; i <= savedIndex; i++) {
+        const initialLoadThrough = Math.max(savedIndex, 1)
+        for (let i = 0; i <= initialLoadThrough && i < total; i++) {
           if (cancelled) return
           const section = book.spine.get(i)
           const html = await extractSectionHtml(book, section)
