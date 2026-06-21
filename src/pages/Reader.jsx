@@ -22,6 +22,30 @@ const THEMES = {
 async function extractSectionHtml(book, section) {
   const raw = await section.render(book.load.bind(book))
   const parsed = new DOMParser().parseFromString(raw, 'text/html')
+
+  // epub.js usually resolves <img src="..."> automatically, but some
+  // books wrap their cover in an SVG <image xlink:href="..."> instead,
+  // which isn't always caught by that same substitution. Resolve any
+  // remaining relative paths manually so covers don't go missing.
+  const root = parsed.body || parsed
+  const refs = [
+    ...root.querySelectorAll('img[src]'),
+    ...root.querySelectorAll('image'),
+  ]
+  await Promise.all(refs.map(async (el) => {
+    const attr = el.hasAttribute('xlink:href') ? 'xlink:href' : (el.hasAttribute('href') ? 'href' : 'src')
+    const value = el.getAttribute(attr)
+    if (!value || /^(blob:|data:|https?:)/.test(value)) return
+    try {
+      const absolutePath = book.path.resolve(section.href, value)
+      const url = await book.archive.createUrl(absolutePath)
+      el.setAttribute(attr, url)
+    } catch {
+      // Leave it as-is if it can't be resolved, better a missing
+      // image than a crash.
+    }
+  }))
+
   let html = parsed.body ? parsed.body.innerHTML : raw
   // Defense in depth, script tags inserted via innerHTML never execute
   // in browsers anyway, but strip them for cleanliness.
@@ -48,6 +72,11 @@ export default function Reader() {
   const [percentage, setPercentage] = useState(0)
   const [bookTitle, setBookTitle] = useState('')
   const [sections, setSections] = useState([]) // [{ index, html }]
+  const [handedness, setHandedness] = useState(() => localStorage.getItem('folio-handedness') || 'right')
+
+  useEffect(() => {
+    localStorage.setItem('folio-handedness', handedness)
+  }, [handedness])
 
   useEffect(() => {
     let cancelled = false
@@ -136,7 +165,7 @@ export default function Reader() {
     }
   }, [id])
 
-const loadNextSection = useCallback(async (startIndex, attemptsLeft = 5) => {
+  const loadNextSection = useCallback(async (startIndex, attemptsLeft = 5) => {
     const book = bookRef.current
     if (!book || loadingNextRef.current || attemptsLeft <= 0) return
     const nextIndex = startIndex ?? (sections.length ? sections[sections.length - 1].index + 1 : 0)
@@ -157,7 +186,7 @@ const loadNextSection = useCallback(async (startIndex, attemptsLeft = 5) => {
     }
   }, [sections])
 
-// Native scroll, no iframe, no manager, nothing to fight. This is
+  // Native scroll, no iframe, no manager, nothing to fight. This is
   // also what tracks progress and lazily loads the next chapter.
   //
   // Mobile's dynamic address bar (it shows/hides mid-scroll) and
@@ -243,18 +272,37 @@ const loadNextSection = useCallback(async (startIndex, attemptsLeft = 5) => {
           borderBottom: `1px solid ${t.text}14`,
         }}
       >
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-current/5 transition-colors">
-          <ArrowLeft size={19} strokeWidth={1.75} />
-        </button>
-        <p className="text-[13px] font-medium truncate max-w-[55%] opacity-80">{bookTitle}</p>
-        <button
-          onClick={() => setSettingsOpen((s) => !s)}
-          className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors font-serif text-[15px] ${
-            settingsOpen ? 'bg-current/10' : 'hover:bg-current/5'
-          }`}
-        >
-          Aa
-        </button>
+        {handedness === 'left' ? (
+          <>
+            <button
+              onClick={() => setSettingsOpen((s) => !s)}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors font-serif text-[15px] ${
+                settingsOpen ? 'bg-current/10' : 'hover:bg-current/5'
+              }`}
+            >
+              Aa
+            </button>
+            <p className="text-[13px] font-medium truncate max-w-[55%] opacity-80">{bookTitle}</p>
+            <button onClick={() => navigate(-1)} className="p-2 -mr-2 rounded-full hover:bg-current/5 transition-colors">
+              <ArrowLeft size={19} strokeWidth={1.75} />
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-current/5 transition-colors">
+              <ArrowLeft size={19} strokeWidth={1.75} />
+            </button>
+            <p className="text-[13px] font-medium truncate max-w-[55%] opacity-80">{bookTitle}</p>
+            <button
+              onClick={() => setSettingsOpen((s) => !s)}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors font-serif text-[15px] ${
+                settingsOpen ? 'bg-current/10' : 'hover:bg-current/5'
+              }`}
+            >
+              Aa
+            </button>
+          </>
+        )}
       </div>
 
       {/* Settings panel */}
@@ -262,7 +310,9 @@ const loadNextSection = useCallback(async (startIndex, attemptsLeft = 5) => {
         <>
           <div className="fixed inset-0 z-20" onClick={() => setSettingsOpen(false)} />
           <div
-            className="absolute top-14 right-4 z-30 w-64 rounded-2xl shadow-2xl p-4"
+            className={`absolute top-14 z-30 w-64 rounded-2xl shadow-2xl p-4 ${
+              handedness === 'left' ? 'left-4' : 'right-4'
+            }`}
             style={{
               background: `${t.bg}f5`,
               backdropFilter: 'blur(20px) saturate(1.4)',
@@ -313,6 +363,21 @@ const loadNextSection = useCallback(async (startIndex, attemptsLeft = 5) => {
               >
                 <PlusIcon size={15} />
               </button>
+            </div>
+
+            <p className="text-[11px] font-semibold uppercase tracking-wide opacity-50 mb-2.5 mt-5">Reading hand</p>
+            <div className="flex bg-current/5 rounded-full p-1">
+              {['left', 'right'].map((hand) => (
+                <button
+                  key={hand}
+                  onClick={() => setHandedness(hand)}
+                  className={`flex-1 text-[12px] font-medium py-1.5 rounded-full capitalize transition-colors ${
+                    handedness === hand ? 'bg-current/15' : ''
+                  }`}
+                >
+                  {hand}
+                </button>
+              ))}
             </div>
           </div>
         </>
