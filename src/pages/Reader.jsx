@@ -156,37 +156,45 @@ const loadNextSection = useCallback(async (startIndex, attemptsLeft = 5) => {
     }
   }, [sections])
 
-  // Native scroll, no iframe, no manager, nothing to fight. This is
+// Native scroll, no iframe, no manager, nothing to fight. This is
   // also what tracks progress and lazily loads the next chapter.
+  //
+  // Mobile's dynamic address bar (it shows/hides mid-scroll) and
+  // momentum scrolling can make a single scroll-event check unreliable
+  // right at the bottom edge, so touchend is a backup trigger too.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
 
+    function checkAndUpdate() {
+      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
+      if (remaining < el.clientHeight * 1.5) loadNextSection()
+
+      const currentIndex = sections.length ? sections[sections.length - 1].index : 0
+      const overallPct = sectionCountRef.current
+        ? Math.min(100, Math.round(
+            ((currentIndex + el.scrollTop / Math.max(el.scrollHeight, 1)) / sectionCountRef.current) * 100
+          ))
+        : 0
+      setPercentage(overallPct)
+      saveProgress(id, {
+        location: JSON.stringify({ sectionIndex: currentIndex }),
+        percentage: overallPct,
+      })
+    }
+
     let debounce
     function handleScroll() {
       clearTimeout(debounce)
-      debounce = setTimeout(() => {
-        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
-        if (remaining < el.clientHeight) loadNextSection()
-
-        const currentIndex = sections.length ? sections[sections.length - 1].index : 0
-        const overallPct = sectionCountRef.current
-          ? Math.min(100, Math.round(
-              ((currentIndex + el.scrollTop / Math.max(el.scrollHeight, 1)) / sectionCountRef.current) * 100
-            ))
-          : 0
-        setPercentage(overallPct)
-        saveProgress(id, {
-          location: JSON.stringify({ sectionIndex: currentIndex }),
-          percentage: overallPct,
-        })
-      }, 200)
+      debounce = setTimeout(checkAndUpdate, 150)
     }
 
     el.addEventListener('scroll', handleScroll, { passive: true })
+    el.addEventListener('touchend', checkAndUpdate)
     return () => {
       clearTimeout(debounce)
       el.removeEventListener('scroll', handleScroll)
+      el.removeEventListener('touchend', checkAndUpdate)
     }
   }, [sections, loadNextSection, id, saveProgress])
 
