@@ -11,8 +11,7 @@ const ARCHIVE_PROXY = '/api/archive'
 
 // Items with access-restricted-item:true are part of the controlled
 // lending library and are deliberately excluded here.
-const PUBLIC_DOMAIN_FILTER = 'mediatype:texts AND NOT access-restricted-item:true'
-
+const PUBLIC_DOMAIN_FILTER = 'mediatype:texts AND NOT access-restricted-item:true AND format:"EPUB"'
 function mapItem(doc) {
   const identifier = doc.identifier
   return {
