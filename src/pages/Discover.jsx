@@ -1,7 +1,23 @@
 import { useState, useEffect, useCallback } from 'react'
 import { searchBooks, getPopularBooks, getBooksByTopic, CURATED_TOPICS } from '../lib/gutendex'
+import * as archive from '../lib/archive'
 import BookCard from '../components/BookCard'
 import { Search, Loader2 } from 'lucide-react'
+
+// Runs both sources in parallel and merges whatever succeeds, so if one
+// source has a hiccup, the other still shows results instead of the
+// whole page failing.
+async function mergedFetch(gutendexFn, archiveFn) {
+  const [gResult, aResult] = await Promise.allSettled([gutendexFn(), archiveFn()])
+  const results = [
+    ...(gResult.status === 'fulfilled' ? gResult.value.results : []),
+    ...(aResult.status === 'fulfilled' ? aResult.value.results : []),
+  ]
+  if (gResult.status === 'rejected' && aResult.status === 'rejected') {
+    throw new Error('Both sources failed')
+  }
+  return results
+}
 
 export default function Discover() {
   const [query, setQuery] = useState('')
@@ -14,8 +30,8 @@ export default function Discover() {
     setLoading(true)
     setError('')
     try {
-      const data = await getPopularBooks()
-      setResults(data.results)
+      const results = await mergedFetch(getPopularBooks, archive.getPopularBooks)
+      setResults(results)
     } catch (err) {
       setError('Could not load books right now.')
     } finally {
@@ -38,8 +54,8 @@ export default function Discover() {
     setLoading(true)
     setError('')
     try {
-      const data = await searchBooks(query)
-      setResults(data.results)
+      const results = await mergedFetch(() => searchBooks(query), () => archive.searchBooks(query))
+      setResults(results)
     } catch (err) {
       setError('Search failed. Check your connection and try again.')
     } finally {
@@ -53,8 +69,8 @@ export default function Discover() {
     setLoading(true)
     setError('')
     try {
-      const data = await getBooksByTopic(topic)
-      setResults(data.results)
+      const results = await mergedFetch(() => getBooksByTopic(topic), () => archive.getBooksByTopic(topic))
+      setResults(results)
     } catch (err) {
       setError('Could not load this topic right now.')
     } finally {
