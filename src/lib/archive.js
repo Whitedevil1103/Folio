@@ -11,7 +11,8 @@ const ARCHIVE_PROXY = '/api/archive'
 
 // Items with access-restricted-item:true are part of the controlled
 // lending library and are deliberately excluded here.
-const PUBLIC_DOMAIN_FILTER = 'mediatype:texts AND NOT access-restricted-item:true AND format:"EPUB"'
+const PUBLIC_DOMAIN_FILTER = 'mediatype:texts AND NOT access-restricted-item:true'
+
 function mapItem(doc) {
   const identifier = doc.identifier
   return {
@@ -25,13 +26,31 @@ function mapItem(doc) {
     subjects: Array.isArray(doc.subject) ? doc.subject : doc.subject ? [doc.subject] : [],
     languages: doc.language ? [doc.language] : [],
     downloadCount: doc.downloads || 0,
-    // epubUrl is resolved lazily via resolveArchiveEpubUrl, since the
-    // search API doesn't tell us the actual filename, just that the
-    // item exists.
     epubUrl: null,
     textUrl: null,
     needsEpubResolution: true,
   }
+}
+
+// Internet Archive's search index only covers item-level metadata
+// (title, creator, collection...), not individual file listings, so
+// there's no query-string way to filter by "has an epub file" the way
+// format:"EPUB" might suggest. This checks each result's real file
+// listing directly, the same lookup the reader uses to download a
+// book, and drops anything that doesn't actually have one. Items that
+// pass get their epub URL resolved right away, so there's no separate
+// lookup needed later when the user opens the book.
+async function verifyAndResolve(items) {
+  const checked = await Promise.allSettled(
+    items.map(async (item) => {
+      const url = await resolveArchiveEpubUrl(item.sourceId)
+      if (!url) throw new Error('No epub')
+      return { ...item, epubUrl: url, needsEpubResolution: false }
+    })
+  )
+  return checked
+    .filter((r) => r.status === 'fulfilled')
+    .map((r) => r.value)
 }
 
 async function searchRaw(query, { page = 1, rows = 20, sort = '' } = {}) {
@@ -43,7 +62,9 @@ async function searchRaw(query, { page = 1, rows = 20, sort = '' } = {}) {
   url.searchParams.append('fl[]', 'subject')
   url.searchParams.append('fl[]', 'language')
   url.searchParams.append('fl[]', 'downloads')
-  url.searchParams.set('rows', rows)
+  // Over-fetch since a chunk of these will turn out to have no epub
+  // and get filtered out after the real check below.
+  url.searchParams.set('rows', rows * 3)
   url.searchParams.set('page', page)
   url.searchParams.set('output', 'json')
   if (sort) url.searchParams.set('sort[]', sort)
@@ -52,9 +73,12 @@ async function searchRaw(query, { page = 1, rows = 20, sort = '' } = {}) {
   if (!res.ok) throw new Error('Internet Archive search failed')
   const data = await res.json()
   const docs = data?.response?.docs || []
+  const candidates = docs.map(mapItem)
+  const verified = await verifyAndResolve(candidates)
+
   return {
     count: data?.response?.numFound || 0,
-    results: docs.map(mapItem),
+    results: verified.slice(0, rows),
   }
 }
 
