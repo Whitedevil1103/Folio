@@ -26,7 +26,7 @@ export default function BookDetail() {
       const existing = collection.find((b) => b.id === id)
       if (existing) {
         if (!cancelled) setBook(existing)
-      } } else if (id.startsWith('gutenberg-')) {
+      } else if (id.startsWith('gutenberg-')) {
         try {
           const sourceId = id.replace('gutenberg-', '')
           const fetched = await getBookById(sourceId)
