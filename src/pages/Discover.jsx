@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { searchBooks, getPopularBooks, getBooksByTopic, CURATED_TOPICS } from '../lib/gutendex'
 import * as archive from '../lib/archive'
 import BookCard from '../components/BookCard'
@@ -20,8 +21,16 @@ async function mergedFetch(gutendexFn, archiveFn) {
 }
 
 export default function Discover() {
-  const [query, setQuery] = useState('')
-  const [activeTopic, setActiveTopic] = useState(null)
+  // The current search/topic lives in the URL (?q=... or ?topic=...),
+  // not just component state, so refreshing, sharing a link, or using
+  // the browser's back button actually returns to what you were
+  // looking at instead of resetting to the default popular list.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlQuery = searchParams.get('q') || ''
+  const urlTopic = searchParams.get('topic') || null
+
+  const [query, setQuery] = useState(urlQuery)
+  const [activeTopic, setActiveTopic] = useState(urlTopic)
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -63,35 +72,50 @@ export default function Discover() {
     runFetch(makeFetchers)
   }, [runFetch])
 
-  useEffect(() => {
-    loadPopular()
-  }, [loadPopular])
-
-  function handleSearch(e) {
-    e.preventDefault()
-    if (!query.trim()) {
-      setActiveTopic(null)
-      loadPopular()
-      return
-    }
-    setActiveTopic(null)
+  const runSearch = useCallback((q) => {
     const makeFetchers = (page) => ({
-      gutendexFn: () => searchBooks(query, { page }),
-      archiveFn: () => archive.searchBooks(query, { page }),
+      gutendexFn: () => searchBooks(q, { page }),
+      archiveFn: () => archive.searchBooks(q, { page }),
     })
     fetcherRef.current = makeFetchers
     runFetch(makeFetchers)
-  }
+  }, [runFetch])
 
-  function handleTopic(topic) {
-    setQuery('')
-    setActiveTopic(topic)
+  const runTopic = useCallback((topic) => {
     const makeFetchers = (page) => ({
       gutendexFn: () => getBooksByTopic(topic, { page }),
       archiveFn: () => archive.getBooksByTopic(topic, { page }),
     })
     fetcherRef.current = makeFetchers
     runFetch(makeFetchers)
+  }, [runFetch])
+
+  // Runs on first load, and whenever the URL itself changes (back/
+  // forward navigation, or a pasted link), restoring whichever view
+  // the URL actually describes.
+  useEffect(() => {
+    if (urlQuery) {
+      runSearch(urlQuery)
+    } else if (urlTopic) {
+      runTopic(urlTopic)
+    } else {
+      loadPopular()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlQuery, urlTopic])
+
+  function handleSearch(e) {
+    e.preventDefault()
+    if (!query.trim()) {
+      setSearchParams({})
+      return
+    }
+    setSearchParams({ q: query })
+  }
+
+  function handleTopic(topic) {
+    setQuery('')
+    setSearchParams({ topic })
   }
 
   function handleLoadMore() {
