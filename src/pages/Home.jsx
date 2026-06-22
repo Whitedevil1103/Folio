@@ -39,7 +39,7 @@ export default function Home() {
                 key={book.id}
                 book={book}
                 progress={progressMap[book.id]?.percentage}
-                size="lg"
+                size="grid"
               />
             ))}
           </div>
