@@ -66,7 +66,7 @@ async function handleDownloadOffline() {
     setDownloading(true)
     try {
       let bookToFetch = book
-      if (book.source === 'archive' && book.needsEpubResolution) {
+      if (book.source === 'archive' && !(book.epubUrl && book.epubUrl.startsWith('http'))) {
         const epubUrl = await resolveArchiveEpubUrl(book.sourceId)
         if (!epubUrl) throw new Error('No epub format available for this book')
         bookToFetch = { ...book, epubUrl, needsEpubResolution: false }
@@ -158,7 +158,7 @@ async function handleDownloadOffline() {
               <button
               onClick={async () => {
                 let bookToOpen = book
-                if (book.source === 'archive' && book.needsEpubResolution) {
+                if (book.source === 'archive' && !(book.epubUrl && book.epubUrl.startsWith('http'))) {
                   try {
                     const epubUrl = await resolveArchiveEpubUrl(book.sourceId)
                     bookToOpen = { ...book, epubUrl, needsEpubResolution: false }
