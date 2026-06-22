@@ -7,13 +7,15 @@ export default function BookCard({ book, progress, size = 'md' }) {
     sm: 'w-24',
     md: 'w-32 sm:w-36',
     lg: 'w-40 sm:w-48',
+    grid: 'w-full',
   }[size]
 
   return (
     <button
       onClick={() => navigate(`/book/${book.id}`)}
-      className="group flex-shrink-0 text-left focus:outline-none"
+      className={`group text-left focus:outline-none ${size === 'grid' ? 'min-w-0' : 'flex-shrink-0'}`}
     >
+      
       <div className={`${dims} relative rounded-sm overflow-hidden shadow-md bg-ink/5 transition-transform duration-200 group-hover:-translate-y-1 group-hover:shadow-xl`}>
         {book.cover ? (
           <img
