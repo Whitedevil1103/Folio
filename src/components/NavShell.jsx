@@ -36,14 +36,13 @@ export default function NavShell({ children }) {
         </nav>
       </aside>
 
-      <div className="flex-1 flex flex-col min-h-screen">
+      <div className="flex-1 flex flex-col min-h-screen min-w-0">
         {/* Mobile top bar */}
         <header className="md:hidden flex items-center justify-center py-4 border-b border-ink/10">
           <span className="font-display text-xl text-teal-600">Folio</span>
         </header>
 
-        <main className="flex-1 pb-20 md:pb-0">{children}</main>
-
+        <main className="flex-1 min-w-0 pb-20 md:pb-0">{children}</main>
         {/* Mobile bottom nav */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-parchment border-t border-ink/10 flex items-center justify-around py-2 px-2">
           {links.map(({ to, label, icon: Icon }) => (
