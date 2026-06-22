@@ -95,6 +95,7 @@ export default function Reader() {
         if (!blob) {
           if (!meta) throw new Error('Book not found')
           let epubUrl = meta.epubUrl
+          if (epubUrl && !epubUrl.startsWith('http')) epubUrl = null
           if (!epubUrl && meta.source === 'archive') {
             epubUrl = await resolveArchiveEpubUrl(meta.sourceId)
           }
