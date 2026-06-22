@@ -7,11 +7,11 @@
 @layer base {
   * { box-sizing: border-box; }
 
-  body {
+body {
     @apply bg-parchment text-ink font-body antialiased;
     -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
   }
-
   /* Reading mode themes */
   .theme-light { background: #F9F7F2; color: #1A1814; }
   .theme-dark  { background: #1C1917; color: #E8E4DC; }
