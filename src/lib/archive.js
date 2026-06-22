@@ -3,11 +3,18 @@
 // not their lending library (which uses DRM and isn't meant to be
 // extracted into a third-party reader).
 //
-// Everything routes through /api/archive/* (see vercel.json), the same
-// pattern used for Gutenberg, so we never depend on archive.org's CORS
-// policy for any given endpoint.
+// Every request that needs to be read by JS (search, file listings,
+// the actual epub download) goes through the existing /api/fetch-book
+// proxy, the same one already used for Gutenberg, since it generically
+// fetches any absolute URL server-side with CORS-friendly headers.
+// Cover images are the one exception, <img> tags don't need CORS to
+// just display a picture, so those load directly from archive.org.
 
-const ARCHIVE_PROXY = '/api/archive'
+const ARCHIVE_ORIGIN = 'https://archive.org'
+
+function viaProxy(absoluteUrl) {
+  return `/api/fetch-book?url=${encodeURIComponent(absoluteUrl)}`
+}
 
 // Items with access-restricted-item:true are part of the controlled
 // lending library and are deliberately excluded here.
@@ -22,7 +29,7 @@ function mapItem(doc) {
     title: doc.title || 'Untitled',
     author: doc.creator || 'Unknown author',
     authors: Array.isArray(doc.creator) ? doc.creator : doc.creator ? [doc.creator] : [],
-    cover: `${ARCHIVE_PROXY}/services/img/${identifier}`,
+    cover: `${ARCHIVE_ORIGIN}/services/img/${identifier}`,
     subjects: Array.isArray(doc.subject) ? doc.subject : doc.subject ? [doc.subject] : [],
     languages: doc.language ? [doc.language] : [],
     downloadCount: doc.downloads || 0,
@@ -34,12 +41,10 @@ function mapItem(doc) {
 
 // Internet Archive's search index only covers item-level metadata
 // (title, creator, collection...), not individual file listings, so
-// there's no query-string way to filter by "has an epub file" the way
-// format:"EPUB" might suggest. This checks each result's real file
-// listing directly, the same lookup the reader uses to download a
-// book, and drops anything that doesn't actually have one. Items that
-// pass get their epub URL resolved right away, so there's no separate
-// lookup needed later when the user opens the book.
+// there's no query-string way to filter by "has an epub file." This
+// checks each result's real file listing directly, the same lookup
+// used to download a book, and drops anything that doesn't actually
+// have one. Items that pass get their epub URL resolved right away.
 async function verifyAndResolve(items) {
   const checked = await Promise.allSettled(
     items.map(async (item) => {
@@ -54,7 +59,7 @@ async function verifyAndResolve(items) {
 }
 
 async function searchRaw(query, { page = 1, rows = 20, sort = '' } = {}) {
-  const url = new URL(`${ARCHIVE_PROXY}/advancedsearch.php`, window.location.origin)
+  const url = new URL(`${ARCHIVE_ORIGIN}/advancedsearch.php`)
   url.searchParams.set('q', query)
   url.searchParams.set('fl[]', 'identifier')
   url.searchParams.append('fl[]', 'title')
@@ -69,7 +74,7 @@ async function searchRaw(query, { page = 1, rows = 20, sort = '' } = {}) {
   url.searchParams.set('output', 'json')
   if (sort) url.searchParams.set('sort[]', sort)
 
-  const res = await fetch(url.toString())
+  const res = await fetch(viaProxy(url.toString()))
   if (!res.ok) throw new Error('Internet Archive search failed')
   const data = await res.json()
   const docs = data?.response?.docs || []
@@ -103,14 +108,15 @@ export async function getBookById(identifier) {
 
 // Internet Archive's search results don't include the actual epub
 // filename, only that the item exists, so this looks up the item's
-// file listing once and finds the right one. Called lazily, only when
-// the user actually opens the book, not for every search result.
+// file listing once and finds the right one.
 export async function resolveArchiveEpubUrl(identifier) {
-  const res = await fetch(`${ARCHIVE_PROXY}/metadata/${identifier}`)
+  const res = await fetch(viaProxy(`${ARCHIVE_ORIGIN}/metadata/${identifier}`))
   if (!res.ok) throw new Error('Could not load this book\'s file listing')
   const data = await res.json()
   const files = data?.files || []
   const epubFile = files.find((f) => f.name?.toLowerCase().endsWith('.epub'))
   if (!epubFile) return null
-  return `${ARCHIVE_PROXY}/download/${identifier}/${encodeURIComponent(epubFile.name)}`
+  // This is the full absolute URL, fetchBookContent will wrap it
+  // through the same /api/fetch-book proxy when actually downloading.
+  return `${ARCHIVE_ORIGIN}/download/${identifier}/${encodeURIComponent(epubFile.name)}`
 }
