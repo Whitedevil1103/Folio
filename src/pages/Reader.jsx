@@ -104,6 +104,7 @@ export default function Reader() {
           blob = result.blob
           saveBookFile(id, blob).catch(() => {})
         }
+
         if (cancelled) return
 
         const arrayBuffer = await blob.arrayBuffer()
@@ -127,11 +128,10 @@ export default function Reader() {
           savedPercentage = existingProgress.percentage || 0
         }
 
-// Load sequentially up through the saved position, so resuming
+        // Load sequentially up through the saved position, so resuming
         // mid-book doesn't require re-scrolling through every chapter.
-        // A chapter that fails to extract is skipped rather than
-        // taking down the whole book, the same as chapters loaded
-        // later while scrolling.
+        // A chapter that fails to extract, or extracts to nothing
+        // visible, is skipped rather than taking down the whole book.
         const loaded = []
         const initialLoadThrough = Math.max(savedIndex, 1)
         for (let i = 0; i <= initialLoadThrough && i < total; i++) {
@@ -139,6 +139,11 @@ export default function Reader() {
           try {
             const section = book.spine.get(i)
             const html = await extractSectionHtml(book, section)
+            const hasText = html.replace(/<[^>]*>/g, '').trim().length > 0
+            const hasResolvedImage = /<img[^>]+src=["']blob:/i.test(html) || /<image[^>]+(?:xlink:)?href=["']blob:/i.test(html)
+            if (!html || (!hasText && !hasResolvedImage)) {
+              throw new Error('Chapter extracted to empty content')
+            }
             loaded.push({ index: i, html })
           } catch (err) {
             console.error(`Failed to load chapter ${i} during initial load, skipping`, err)
@@ -147,7 +152,6 @@ export default function Reader() {
         if (loaded.length === 0) {
           throw new Error('This book could not be opened, its file may be malformed.')
         }
-        
         if (cancelled) return
         setSections(loaded)
         setPercentage(savedPercentage)
@@ -171,6 +175,8 @@ export default function Reader() {
           // Anything else is likely a technical failure from deep
           // inside epub.js reacting to a malformed file, show
           // something a person can actually understand instead.
+          // Optional chaining throughout, since whatever was thrown
+          // might not even be a real Error object.
           const knownMessages = [
             'Book not found',
             'No epub format available for this book',
@@ -203,6 +209,11 @@ export default function Reader() {
     try {
       const section = book.spine.get(nextIndex)
       const html = await extractSectionHtml(book, section)
+      const hasText = html.replace(/<[^>]*>/g, '').trim().length > 0
+      const hasResolvedImage = /<img[^>]+src=["']blob:/i.test(html) || /<image[^>]+(?:xlink:)?href=["']blob:/i.test(html)
+      if (!html || (!hasText && !hasResolvedImage)) {
+        throw new Error('Chapter extracted to empty content')
+      }
       setSections((prev) => [...prev, { index: nextIndex, html }])
       loadingNextRef.current = false
     } catch (err) {
@@ -224,7 +235,7 @@ export default function Reader() {
     const el = containerRef.current
     if (!el) return
 
-function checkAndUpdate() {
+    function checkAndUpdate() {
       const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
       if (remaining < el.clientHeight * 1.5) loadNextSection()
 
@@ -253,6 +264,7 @@ function checkAndUpdate() {
         percentage: overallPct,
       })
     }
+
     let debounce
     function handleScroll() {
       clearTimeout(debounce)
@@ -452,7 +464,7 @@ function checkAndUpdate() {
           <div className="reader-content">
             {sections.map((s) => (
               <div key={s.index} data-section-index={s.index} dangerouslySetInnerHTML={{ __html: s.html }} />
-            ))}          
+            ))}
           </div>
         </div>
       )}
