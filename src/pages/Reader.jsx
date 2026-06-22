@@ -127,16 +127,27 @@ export default function Reader() {
           savedPercentage = existingProgress.percentage || 0
         }
 
-        // Load sequentially up through the saved position, so resuming
+// Load sequentially up through the saved position, so resuming
         // mid-book doesn't require re-scrolling through every chapter.
+        // A chapter that fails to extract is skipped rather than
+        // taking down the whole book, the same as chapters loaded
+        // later while scrolling.
         const loaded = []
         const initialLoadThrough = Math.max(savedIndex, 1)
         for (let i = 0; i <= initialLoadThrough && i < total; i++) {
           if (cancelled) return
-          const section = book.spine.get(i)
-          const html = await extractSectionHtml(book, section)
-          loaded.push({ index: i, html })
+          try {
+            const section = book.spine.get(i)
+            const html = await extractSectionHtml(book, section)
+            loaded.push({ index: i, html })
+          } catch (err) {
+            console.error(`Failed to load chapter ${i} during initial load, skipping`, err)
+          }
         }
+        if (loaded.length === 0) {
+          throw new Error('This book could not be opened, its file may be malformed.')
+        }
+        
         if (cancelled) return
         setSections(loaded)
         setPercentage(savedPercentage)
