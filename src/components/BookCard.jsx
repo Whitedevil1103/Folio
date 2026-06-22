@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 export default function BookCard({ book, progress, size = 'md' }) {
   const navigate = useNavigate()
 
-  const dims = {
+const dims = {
     sm: 'w-24',
     md: 'w-32 sm:w-36',
     lg: 'w-40 sm:w-48',
