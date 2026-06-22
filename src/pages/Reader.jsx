@@ -184,7 +184,7 @@ export default function Reader() {
           ]
           const friendly = knownMessages.includes(err?.message)
             ? err.message
-            : "This book couldn't be opened. Its file may not be properly formatted."
+            : "This book couldn't be opened. Its file may not be properly formatted. Please try Another!"
           setError(friendly)
           setLoading(false)
         }
