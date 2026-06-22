@@ -150,7 +150,7 @@ export default function Reader() {
           }
         }
         if (loaded.length === 0) {
-          throw new Error('This book could not be opened, its file may be malformed.')
+          throw new Error('This book could not be opened, its file may be corrupted. Please try Another!')
         }
         if (cancelled) return
         setSections(loaded)
