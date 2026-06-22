@@ -176,7 +176,7 @@ export default function Reader() {
             'No epub format available for this book',
             'This book could not be opened, its file may be malformed.',
           ]
-          const friendly = knownMessages.includes(err.message)
+          const friendly = knownMessages.includes(err?.message)
             ? err.message
             : "This book couldn't be opened. Its file may not be properly formatted."
           setError(friendly)
