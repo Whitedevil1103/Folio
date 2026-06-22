@@ -32,7 +32,7 @@ export default function Collection() {
       ) : (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-5">
           {filtered.map((book) => (
-            <BookCard key={book.id} book={book} progress={progressMap[book.id]?.percentage} />
+            <BookCard key={book.id} book={book} progress={progressMap[book.id]?.percentage} size="grid" />
           ))}
         </div>
       )}
