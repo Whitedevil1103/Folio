@@ -167,7 +167,19 @@ export default function Reader() {
       } catch (err) {
         console.error(err)
         if (!cancelled) {
-          setError(err.message || 'Could not open this book')
+          // Our own thrown errors are written to be read directly.
+          // Anything else is likely a technical failure from deep
+          // inside epub.js reacting to a malformed file, show
+          // something a person can actually understand instead.
+          const knownMessages = [
+            'Book not found',
+            'No epub format available for this book',
+            'This book could not be opened, its file may be malformed.',
+          ]
+          const friendly = knownMessages.includes(err.message)
+            ? err.message
+            : "This book couldn't be opened. Its file may not be properly formatted."
+          setError(friendly)
           setLoading(false)
         }
       }
