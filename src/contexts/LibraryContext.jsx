@@ -12,6 +12,12 @@ export function LibraryProvider({ children }) {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [syncing, setSyncing] = useState(false)
   const initialized = useRef(false)
+  const collectionRef = useRef([])
+  const progressRef = useRef({})
+  const lastSyncRef = useRef(0)
+
+  useEffect(() => { collectionRef.current = collection }, [collection])
+  useEffect(() => { progressRef.current = progressMap }, [progressMap])
 
   // Track connectivity
   useEffect(() => {
@@ -40,6 +46,7 @@ export function LibraryProvider({ children }) {
       setProgressMap(pMap)
 
       if (isAuthenticated && isOnline) {
+        lastSyncRef.current = Date.now()
         await reconcileWithRemote(localBooks, pMap)
       }
       initialized.current = true
@@ -55,6 +62,28 @@ export function LibraryProvider({ children }) {
       flushPendingSync()
     }
   }, [isOnline, isAuthenticated])
+
+  // Sync only happening once, on initial load, means an already-open
+  // tab never notices changes made on another device. This re-checks
+  // with Supabase whenever the tab becomes visible again (switching
+  // back to it, or unlocking the phone), with a short cooldown so
+  // rapid tab-switching doesn't spam requests.
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState !== 'visible') return
+      if (!isAuthenticated || !isOnline || !initialized.current) return
+      const now = Date.now()
+      if (now - lastSyncRef.current < 15000) return
+      lastSyncRef.current = now
+      reconcileWithRemote(collectionRef.current, progressRef.current)
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('focus', handleVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('focus', handleVisibility)
+    }
+  }, [isAuthenticated, isOnline])
 
   async function reconcileWithRemote(localBooks, localProgressMap) {
     setSyncing(true)
