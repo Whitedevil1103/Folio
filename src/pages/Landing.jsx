@@ -65,7 +65,7 @@ export default function Landing() {
                 onClick={() => navigate('/login')}
                 className="bg-teal-600 text-white text-sm font-medium px-6 py-3.5 rounded-lg hover:bg-teal-500 transition-colors"
               >
-                Start reading — free
+                Start reading
               </button>
               <span className="text-xs text-ink-muted">No card. No catch.</span>
             </div>
@@ -118,7 +118,7 @@ export default function Landing() {
           onClick={() => navigate('/login')}
           className="bg-teal-600 text-white text-sm font-medium px-7 py-3.5 rounded-lg hover:bg-teal-500 transition-colors"
         >
-          Start reading — free
+          Start reading
         </button>
       </section>
 
