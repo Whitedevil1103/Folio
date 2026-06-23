@@ -98,8 +98,25 @@ export function LibraryProvider({ children }) {
         .select('*')
         .eq('user_id', user.id)
 
-      // Merge books: union of local + remote, remote wins on conflict for metadata
+// Merge books: union of local + remote, remote wins on conflict
+      // for metadata. A book that exists locally but is no longer in
+      // the remote results has been removed on another device, so it
+      // gets cleaned up here too, unless it's a local addition that
+      // hasn't synced up yet (protected via the pending-sync queue).
+      const remoteBookIds = new Set((remoteBooks || []).map((rb) => rb.book_id))
+      const pending = await localdb.getPendingSync()
+      const pendingAddIds = new Set(
+        pending.filter((p) => p.type === 'add_book').map((p) => p.book.id)
+      )
+
       const merged = { ...Object.fromEntries(localBooks.map((b) => [b.id, b])) }
+      for (const localId of Object.keys(merged)) {
+        if (!remoteBookIds.has(localId) && !pendingAddIds.has(localId)) {
+          delete merged[localId]
+          localdb.deleteBookMeta(localId).catch(() => {})
+          localdb.deleteBookFile(localId).catch(() => {})
+        }
+      }
       for (const rb of remoteBooks || []) {
         merged[rb.book_id] = {
           id: rb.book_id,
@@ -115,7 +132,7 @@ export function LibraryProvider({ children }) {
         await localdb.saveBookMeta(merged[rb.book_id])
       }
       setCollection(Object.values(merged))
-
+      
       // Merge progress: last-write-wins by updatedAt
       const mergedProgress = { ...localProgressMap }
       for (const rp of remoteProgress || []) {
